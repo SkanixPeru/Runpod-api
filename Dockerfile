@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 
 # 7. Exponer el puerto del servidor
-EXPOSE 8000 # Solo necesitas exponer el puerto de tu API, 22 es para SSH/debug
+EXPOSE 8000
 
 # 8. Comando para iniciar el servidor
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
