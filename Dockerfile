@@ -12,8 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 #    Esto se hará automáticamente por app.py si no existe
 #    RUN mkdir /app/model_sd3_5_large
 
-# 5. ¡ELIMINADO! Ya no se autentica ni descarga el modelo durante la construcción.
-
 # 6. Copiar el script de tu API (app.py)
 COPY app.py .
 
