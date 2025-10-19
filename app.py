@@ -5,7 +5,7 @@ import base64
 import re
 from PIL import Image
 from fastapi import FastAPI, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field # Importa Pydantic para manejar el JSON
 from diffusers import DiffusionPipeline, StableDiffusionImg2ImgPipeline
 from huggingface_hub import snapshot_download, login
 import logging
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # --- Definir la estructura JSON de ENTRADA ---
-# Esto coincide con el estándar de Runpod y tu script de PowerShell
+# Esto coincide con el estándar de Runpod
 class Item(BaseModel):
     image: str = Field(..., description="La imagen codificada en Base64 (ej: data:image/jpeg;base64,...)")
     prompt: str
@@ -27,13 +27,17 @@ class Item(BaseModel):
 class RunpodInput(BaseModel):
     input: Item
 
-# --- Lógica de descarga y autenticación (SIN CAMBIOS) ---
-LOCAL_MODEL_DIR = "/app/model_sd_3_5_large"
+# --- Lógica de descarga y autenticación ---
+# ¡CAMBIO IMPORTANTE!
+# Ahora apunta a tu "disco duro" (Network Storage).
+LOCAL_MODEL_DIR = "/runpod-volume/model_sd_3_5_large" 
 HF_MODEL_ID = "stabilityai/stable-diffusion-3.5-large"
 
+# Esto solo se ejecutará LA PRIMERA VEZ que llames a la API.
+# Descargará el modelo al "disco duro".
 if not os.path.exists(LOCAL_MODEL_DIR):
     os.makedirs(LOCAL_MODEL_DIR, exist_ok=True)
-    logger.info("Directorio del modelo no encontrado, iniciando descarga...")
+    logger.info("Directorio del modelo no encontrado en el disco duro, iniciando descarga (esto tardará varios minutos)...")
 
     hf_token = os.environ.get('HF_TOKEN')
     if hf_token:
@@ -53,13 +57,14 @@ if not os.path.exists(LOCAL_MODEL_DIR):
             local_dir_use_symlinks=False,
             resume_download=True
         )
-        logger.info("Descarga del modelo completa.")
+        logger.info("Descarga del modelo al disco duro completa.")
     except Exception as e:
         logger.error(f"Error fatal al descargar el modelo de Hugging Face: {e}")
 else:
-    logger.info("Directorio del modelo encontrado localmente. No se necesita descarga.")
+    # A partir de la SEGUNDA llamada, entrará aquí (instantáneo)
+    logger.info("Directorio del modelo encontrado en el disco duro. Cargando...")
 
-# --- Cargar los Pipelines (SIN CAMBIOS) ---
+# --- Cargar los Pipelines ---
 text2img_pipe = None
 img2img_pipe = None
 try:
@@ -83,17 +88,14 @@ async def health():
     else:
         return Response(content='{"error":"Pipelines not loaded"}', status_code=503, media_type="application/json")
 
-# --- Endpoint /predict (ACTUALIZADO PARA JSON) ---
 @app.post("/predict")
-async def predict(runpod_input: RunpodInput): # <-- Acepta el JSON de Runpod
+async def predict(runpod_input: RunpodInput): # <-- Acepta el JSON
     """Genera o edita una imagen desde un input JSON con Base64."""
     item = runpod_input.input # Extrae el objeto "input"
     
     logger.info(f"Modo Img2Img (JSON). Strength: {item.denoising_strength}")
-    
     try:
         # Decodificar la imagen Base64
-        # Quita el prefijo "data:image/jpeg;base64,"
         img_data_str = item.image.split(',')[-1]
         img_data_bytes = base64.b64decode(img_data_str)
         init_image = Image.open(io.BytesIO(img_data_bytes)).convert("RGB")
