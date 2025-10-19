@@ -6,4 +6,4 @@ fastapi
 uvicorn
 Pillow
 huggingface_hub
-python-multipart
+pydantic
