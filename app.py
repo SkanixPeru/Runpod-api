@@ -1,32 +1,40 @@
 import os
 import io
 import torch
+import base64
+import re
 from PIL import Image
-from fastapi import FastAPI, Response, UploadFile, File, Form
+from fastapi import FastAPI, Response
+from pydantic import BaseModel, Field
 from diffusers import DiffusionPipeline, StableDiffusionImg2ImgPipeline
 from huggingface_hub import snapshot_download, login
 import logging
 
-# Configurar logging básico
+# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Ruta local donde se guardará el modelo en el contenedor
-LOCAL_MODEL_DIR = "/app/model_sd3_5_large"
-HF_MODEL_ID = "stabilityai/stable-diffusion-3.5-large"
+# --- Definir la estructura JSON de ENTRADA ---
+# Esto coincide con el estándar de Runpod y tu script de PowerShell
+class Item(BaseModel):
+    image: str = Field(..., description="La imagen codificada en Base64 (ej: data:image/jpeg;base64,...)")
+    prompt: str
+    denoising_strength: float = 0.5
+    num_inference_steps: int = 25
 
-# --- Lógica de descarga y autenticación al iniciar el contenedor ---
-# Esto se ejecuta UNA VEZ cuando el contenedor arranca (el "arranque en frío")
-# Se asegura de que el modelo esté disponible antes de cargar los pipelines.
+class RunpodInput(BaseModel):
+    input: Item
+
+# --- Lógica de descarga y autenticación (SIN CAMBIOS) ---
+LOCAL_MODEL_DIR = "/app/model_sd_3_5_large"
+HF_MODEL_ID = "stabilityai/stable-diffusion-3.5-large"
 
 if not os.path.exists(LOCAL_MODEL_DIR):
     os.makedirs(LOCAL_MODEL_DIR, exist_ok=True)
-    
     logger.info("Directorio del modelo no encontrado, iniciando descarga...")
 
-    # Autenticación con Hugging Face
     hf_token = os.environ.get('HF_TOKEN')
     if hf_token:
         try:
@@ -34,11 +42,9 @@ if not os.path.exists(LOCAL_MODEL_DIR):
             logger.info("Hugging Face login successful.")
         except Exception as e:
             logger.error(f"Error logging into Hugging Face: {e}")
-            # Continuar, la descarga podría fallar si el repo es gated.
     else:
-        logger.warning("HF_TOKEN environment variable not set. Download might fail if model is gated.")
+        logger.warning("HF_TOKEN environment variable not set.")
 
-    # Descargar el modelo
     try:
         logger.info(f"Descargando modelo {HF_MODEL_ID} a {LOCAL_MODEL_DIR}...")
         snapshot_download(
@@ -50,106 +56,68 @@ if not os.path.exists(LOCAL_MODEL_DIR):
         logger.info("Descarga del modelo completa.")
     except Exception as e:
         logger.error(f"Error fatal al descargar el modelo de Hugging Face: {e}")
-        # Si la descarga falla aquí, el contenedor no podrá iniciar correctamente.
-        # Esto resultará en que el endpoint /health no responda.
 else:
     logger.info("Directorio del modelo encontrado localmente. No se necesita descarga.")
 
-
-# --- Cargar los Pipelines ---
-# Carga los modelos desde el disco local del contenedor a la GPU.
+# --- Cargar los Pipelines (SIN CAMBIOS) ---
 text2img_pipe = None
 img2img_pipe = None
-
 try:
     logger.info("Cargando pipelines en la GPU...")
-    # Cargar el pipeline Text2Img
     text2img_pipe = DiffusionPipeline.from_pretrained(
-        LOCAL_MODEL_DIR,
-        torch_dtype=torch.float16,
-        use_safetensors=True,
-        variant="fp16" # Usar la variante fp16 si está disponible
+        LOCAL_MODEL_DIR, torch_dtype=torch.float16, use_safetensors=True, variant="fp16"
     ).to("cuda")
-
-    # Cargar el pipeline Img2Img
     img2img_pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-        LOCAL_MODEL_DIR,
-        torch_dtype=torch.float16,
-        use_safetensors=True,
-        variant="fp16"
+        LOCAL_MODEL_DIR, torch_dtype=torch.float16, use_safetensors=True, variant="fp16"
     ).to("cuda")
-
-    logger.info("¡Éxito! Modelos Stable Diffusion 3.5 Large (Text2Img & Img2Img) cargados en GPU.")
+    logger.info("¡Éxito! Modelos cargados en GPU.")
 except Exception as e:
-    logger.error(f"Error fatal al cargar modelos SD3.5 en GPU: {e}.")
-    # Si falla aquí, el pod probablemente se reiniciará.
-
+    logger.error(f"Error fatal al cargar modelos SD3.5 en GPU: {e}")
 
 # --- Endpoints de la API ---
 
 @app.get("/health")
 async def health():
-    """Endpoint de chequeo de salud que Runpod usará."""
-    if img2img_pipe is not None and text2img_pipe is not None:
+    if img2img_pipe is not None:
         return {"status": "ok", "message": "Pipelines loaded."}
     else:
-        return Response(content="Error: Pipelines not loaded.", status_code=503)
+        return Response(content='{"error":"Pipelines not loaded"}', status_code=503, media_type="application/json")
 
-
+# --- Endpoint /predict (ACTUALIZADO PARA JSON) ---
 @app.post("/predict")
-async def predict(
-    prompt: str = Form(...),
-    image: UploadFile = File(None),
-    denoising_strength: float = Form(0.5),
-    num_inference_steps: int = Form(25)
-):
-    """Genera o edita una imagen."""
-    logger.info(f"Recibida solicitud /predict. Prompt: {prompt[:30]}...")
-    output_image = None
-
-    if image and image.filename != '':
-        # --- MODO Img2Img (Edición) ---
-        logger.info(f"Modo Img2Img. Strength: {denoising_strength}, Steps: {num_inference_steps}")
-        try:
-            input_image_bytes = await image.read()
-            init_image = Image.open(io.BytesIO(input_image_bytes)).convert("RGB")
-            init_image = init_image.resize((1024, 1024))
+async def predict(runpod_input: RunpodInput): # <-- Acepta el JSON de Runpod
+    """Genera o edita una imagen desde un input JSON con Base64."""
+    item = runpod_input.input # Extrae el objeto "input"
     
-            if img2img_pipe is None:
-                logger.error("Img2Img pipeline no está cargado.")
-                return Response(content="Error: Img2Img pipeline no cargado.", status_code=503)
+    logger.info(f"Modo Img2Img (JSON). Strength: {item.denoising_strength}")
     
-            with torch.no_grad():
-                output_image = img2img_pipe(
-                    prompt=prompt,
-                    image=init_image,
-                    strength=denoising_strength,
-                    num_inference_steps=num_inference_steps
-                ).images[0]
-            logger.info("Generación Img2Img completada.")
+    try:
+        # Decodificar la imagen Base64
+        # Quita el prefijo "data:image/jpeg;base64,"
+        img_data_str = item.image.split(',')[-1]
+        img_data_bytes = base64.b64decode(img_data_str)
+        init_image = Image.open(io.BytesIO(img_data_bytes)).convert("RGB")
+        init_image = init_image.resize((1024, 1024))
 
-        except Exception as e:
-            logger.error(f"Error durante la predicción Img2Img: {e}")
-            return Response(content=f"Error interno: {e}", status_code=500)
-            
-    else:
-        # --- MODO Text2Img (Generación) ---
-        logger.info(f"Modo Text2Img. Steps: {num_inference_steps}")
-        if text2img_pipe is None:
-            logger.error("Text2Img pipeline no está cargado.")
-            return Response(content="Error: Text2Img pipeline no cargado.", status_code=503)
-        
+        if img2img_pipe is None:
+            logger.error("Img2Img pipeline no está cargado.")
+            return Response(content='{"error":"Img2Img pipeline not loaded"}', status_code=503, media_type="application/json")
+
         with torch.no_grad():
-            output_image = text2img_pipe(
-                prompt=prompt,
-                num_inference_steps=num_inference_steps
+            output_image = img2img_pipe(
+                prompt=item.prompt,
+                image=init_image,
+                strength=item.denoising_strength,
+                num_inference_steps=item.num_inference_steps
             ).images[0]
-        logger.info("Generación Text2Img completada.")
+        logger.info("Generación Img2Img completada.")
 
-    if output_image:
+        # Devolver la imagen
         img_byte_arr = io.BytesIO()
         output_image.save(img_byte_arr, format="PNG")
         img_byte_arr = img_byte_arr.getvalue()
         return Response(content=img_byte_arr, media_type="image/png")
-    else:
-        return Response(content="Error: No se pudo generar la imagen.", status_code=500)
+
+    except Exception as e:
+        logger.error(f"Error durante la predicción Img2Img: {e}")
+        return Response(content=f'{{"error":"Internal server error: {e}"}}', status_code=500, media_type="application/json")
