@@ -20,6 +20,10 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 AUTH_TOKEN = os.getenv("HUGGINGFACE_HUB_TOKEN")
 pipeline = None # Pipeline inicializado como None
 
+# RUTA CRÍTICA: RunPod monta el Network Volume en /workspace
+WORKSPACE_DIR = "/workspace"
+HF_CACHE_DIR = os.path.join(WORKSPACE_DIR, "huggingface_cache")
+
 # -----------------------------
 # Inicialización y Carga de Pipeline (RUNTIME)
 # Se ejecuta al iniciar el servidor Uvicorn.
@@ -27,17 +31,24 @@ pipeline = None # Pipeline inicializado como None
 def load_models_on_startup():
     global pipeline
     try:
+        # 1. Crear el directorio de caché si no existe
+        if not os.path.exists(HF_CACHE_DIR):
+            os.makedirs(HF_CACHE_DIR, exist_ok=True)
+            print(f"✅ Creado directorio de caché persistente: {HF_CACHE_DIR}")
+
         if AUTH_TOKEN:
-            # 1. Login para autenticar el acceso al modelo gated (IMPORTANTE)
+            # Login para autenticar el acceso al modelo gated (IMPORTANTE)
             login(token=AUTH_TOKEN, add_to_git_credential=False)
             print("✅ Logueado en Hugging Face.")
         else:
             print("⚠️ HUGGINGFACE_HUB_TOKEN no definido. Fallará si el modelo es gated.")
 
         # 2. Descargar y Cargar Modelo Base
-        print(f"📥 Descargando y cargando modelo base {MODEL_NAME}...")
+        # Usamos 'cache_dir' para guardar el modelo permanentemente en el Network Volume
+        print(f"📥 Descargando/cargando modelo base {MODEL_NAME}...")
         pipe_t2i = AutoPipelineForText2Image.from_pretrained(
             MODEL_NAME, 
+            cache_dir=HF_CACHE_DIR, # <--- Corregido: Usa la ruta persistente
             torch_dtype=torch.bfloat16,
             token=AUTH_TOKEN
         ).to(DEVICE)
@@ -46,10 +57,12 @@ def load_models_on_startup():
         pipeline = StableDiffusionImg2ImgPipeline(**pipe_t2i.components)
         
         # 3. Descargar y Cargar LoRA
-        print(f"📥 Descargando y cargando LoRA {LORA_NAME}...")
+        # Usamos 'cache_dir' para guardar el LoRA permanentemente en el Network Volume
+        print(f"📥 Descargando/cargando LoRA {LORA_NAME}...")
         lora_local_path = hf_hub_download(
             repo_id=LORA_NAME, 
             filename=LORA_FILENAME, 
+            cache_dir=HF_CACHE_DIR, # <--- Corregido: Usa la ruta persistente
             token=AUTH_TOKEN
         )
 
@@ -89,7 +102,7 @@ async def generate_image(
             prompt=prompt,
             negative_prompt=negative_prompt,
             image=img,
-            strength=strength, # Usa el valor de 0.35 si no se especifica
+            strength=strength, 
             guidance_scale=guidance_scale,
             num_inference_steps=num_inference_steps
         ).images[0]
