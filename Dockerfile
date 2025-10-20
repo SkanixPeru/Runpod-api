@@ -36,7 +36,7 @@ RUN python3 - <<'EOF'
 from diffusers import AutoPipelineForText2Image
 import torch
 
-token = "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"
+token = "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"
 print(f"Descargando modelo base con token: {token[:10]}...")
 
 pipe = AutoPipelineForText2Image.from_pretrained(
@@ -48,7 +48,7 @@ EOF
 
 # Descargar LoRA NSFW
 RUN mkdir -p /app/models && \
-    wget --header="Authorization: Bearer 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" \
+    wget --header="Authorization: Bearer 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" \
     -O /app/models/Flux-uncensored-v2.safetensors \
     https://huggingface.co/enhanceaiteam/Flux-uncensored-v2/resolve/main/lora.safetensors
 
