@@ -1,7 +1,3 @@
-# ==============================
-# Dockerfile para endpoint FLUX img2img (SEGURO)
-# ==============================
-
 # Base CUDA con Ubuntu (compatible con RunPod)
 FROM nvidia/cuda:13.0.1-cudnn-runtime-ubuntu22.04
 
