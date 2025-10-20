@@ -28,45 +28,33 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 RUN pip install --no-cache-dir diffusers transformers accelerate safetensors fastapi uvicorn pillow huggingface_hub
 
 # ==============================
-# Descargar modelos automáticamente (SOLUCIÓN AL ERROR 401)
+# Descargar modelos automáticamente
 # ==============================
 
-# Transferir la variable de entorno del token de RunPod al ambiente
-ARG HUGGINGFACE_HUB_TOKEN
-ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
-
-# 0. VERIFICACIÓN DEL TOKEN (NUEVO PASO)
-RUN sh -c 'echo "🔑 Token HUGGINGFACE_HUB_TOKEN:" && \
-    if [ -n "$HUGGINGFACE_HUB_TOKEN" ]; then \
-        echo "Token encontrado, longitud: ${#HUGGINGFACE_HUB_TOKEN} caracteres. (Las primeras 5 letras son: ${HUGGINGFACE_HUB_TOKEN:0:5}...)"; \
-    else \
-        echo "ERROR: La variable de entorno HUGGINGFACE_HUB_TOKEN no está definida. La descarga fallará."; \
-        exit 1; \
-    fi'
-
-
-# 1. Modelo base (FLUX-1-dev) - Usa snapshot_download para autenticación y descarga
-RUN mkdir -p /app/models
+# Modelo base (FLUX-1-dev)
 RUN python3 - <<'EOF'
-from huggingface_hub import snapshot_download
-import os
+from diffusers import AutoPipelineForText2Image
+import torch
 
-token = os.getenv("HUGGINGFACE_HUB_TOKEN")
-print(f"Descargando modelo base con token (trunco en Python): {token[:10]}...")
+token = "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"  # 🔑 Token directo temporal
+print(f"Descargando modelo base con token: {token[:10]}...")
 
-# Utilizamos snapshot_download para forzar la descarga del repositorio completo
-snapshot_download(
-    repo_id="black-forest-labs/FLUX.1-dev",
-    local_dir="/app/models/FLUX.1-dev",
-    allow_patterns=["*"],
-    token=token
+pipe = AutoPipelineForText2Image.from_pretrained(
+    "black-forest-labs/FLUX.1-dev",
+    torch_dtype=torch.bfloat16,
+    use_auth_token=token
 )
-print("✅ Modelo base FLUX.1-dev descargado en /app/models/FLUX.1-dev.")
 EOF
 
-# 2. Descargar el LoRA NSFW (Flux Uncensored)
-RUN mkdir -p /app/models/loras && \
-    wget -O /app/models/loras/Flux-uncensored-v2.safetensors "https://huggingface.co/enhanceaiteam/Flux-uncensored-v2/resolve/main/lora.safetensors"
+# Descargar LoRA NSFW
+RUN mkdir -p /app/models && \
+    wget --header="Authorization: Bearer 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" \
+    -O /app/models/Flux-uncensored-v2.safetensors \
+    https://huggingface.co/enhanceaiteam/Flux-uncensored-v2/resolve/main/lora.safetensors
+
+# Limpieza de token (seguridad)
+RUN rm -rf ~/.cache/huggingface && \
+    echo "Token eliminado del entorno ✅"
 
 # ==============================
 # Configuración de FastAPI
