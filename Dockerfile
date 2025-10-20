@@ -36,7 +36,7 @@ RUN python3 - <<'EOF'
 from diffusers import AutoPipelineForText2Image
 import torch
 
-token = "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"  # 🔑 Token directo temporal
+token = "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"
 print(f"Descargando modelo base con token: {token[:10]}...")
 
 pipe = AutoPipelineForText2Image.from_pretrained(
