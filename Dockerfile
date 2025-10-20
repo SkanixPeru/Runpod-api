@@ -23,7 +23,7 @@ WORKDIR /app
 COPY main.py /app/
 
 # Instalar librerías de Python necesarias
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url [https://download.pytorch.org/whl/cu121](https://download.pytorch.org/whl/cu121)
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 # Añadimos 'huggingface-cli' y 'huggingface_hub' para descargar los modelos
 RUN pip install --no-cache-dir diffusers transformers accelerate safetensors fastapi uvicorn pillow huggingface_hub
 
@@ -35,6 +35,16 @@ RUN pip install --no-cache-dir diffusers transformers accelerate safetensors fas
 ARG HUGGINGFACE_HUB_TOKEN
 ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
 
+# 0. VERIFICACIÓN DEL TOKEN (NUEVO PASO)
+RUN sh -c 'echo "🔑 Token HUGGINGFACE_HUB_TOKEN:" && \
+    if [ -n "$HUGGINGFACE_HUB_TOKEN" ]; then \
+        echo "Token encontrado, longitud: ${#HUGGINGFACE_HUB_TOKEN} caracteres. (Las primeras 5 letras son: ${HUGGINGFACE_HUB_TOKEN:0:5}...)"; \
+    else \
+        echo "ERROR: La variable de entorno HUGGINGFACE_HUB_TOKEN no está definida. La descarga fallará."; \
+        exit 1; \
+    fi'
+
+
 # 1. Modelo base (FLUX-1-dev) - Usa snapshot_download para autenticación y descarga
 RUN mkdir -p /app/models
 RUN python3 - <<'EOF'
@@ -42,7 +52,7 @@ from huggingface_hub import snapshot_download
 import os
 
 token = os.getenv("HUGGINGFACE_HUB_TOKEN")
-print(f"Descargando modelo base con token: {token[:10]}...")
+print(f"Descargando modelo base con token (trunco en Python): {token[:10]}...")
 
 # Utilizamos snapshot_download para forzar la descarga del repositorio completo
 snapshot_download(
@@ -56,7 +66,7 @@ EOF
 
 # 2. Descargar el LoRA NSFW (Flux Uncensored)
 RUN mkdir -p /app/models/loras && \
-    wget -O /app/models/loras/Flux-uncensored-v2.safetensors "[https://huggingface.co/enhanceaiteam/Flux-uncensored-v2/resolve/main/lora.safetensors](https://huggingface.co/enhanceaiteam/Flux-uncensored-v2/resolve/main/lora.safetensors)"
+    wget -O /app/models/loras/Flux-uncensored-v2.safetensors "https://huggingface.co/enhanceaiteam/Flux-uncensored-v2/resolve/main/lora.safetensors"
 
 # ==============================
 # Configuración de FastAPI
