@@ -1,5 +1,5 @@
 # ==============================
-# Dockerfile para endpoint NSFW img2img / text2img (CORREGIDO)
+# Dockerfile para endpoint FLUX img2img (SEGURO)
 # ==============================
 
 # Base CUDA con Ubuntu (compatible con RunPod)
@@ -8,12 +8,13 @@ FROM nvidia/cuda:13.0.1-cudnn-runtime-ubuntu22.04
 # Evita prompts interactivos
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar dependencias básicas (añadimos 'huggingface-cli' para descargar)
+# Instalar dependencias básicas
 RUN apt-get update && apt-get install -y \
     git \
     python3-pip \
     python3-dev \
     wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Crear carpeta de la app
@@ -22,39 +23,19 @@ WORKDIR /app
 # Copiar archivos
 COPY main.py /app/
 
-# Instalar librerías de Python necesarias
+# Instalar librerías de Python necesarias (PyTorch)
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-# Añadimos 'huggingface-cli' y 'huggingface_hub' para descargar los modelos
-RUN pip install --no-cache-dir diffusers transformers accelerate safetensors fastapi uvicorn pillow huggingface_hub
+
+# Instalar librerías de Python (Diffusers, FastAPI, etc.)
+RUN pip install --no-cache-dir diffusers transformers accelerate safetensors fastapi uvicorn pillow huggingface_hub requests
 
 # ==============================
-# Descargar modelos automáticamente
-# ==============================
+# Configuración de Modelos y Token
+# =========================================================================
 
-# Modelo base (FLUX-1-dev)
-RUN python3 - <<'EOF'
-from diffusers import AutoPipelineForText2Image
-import torch
-
-token = "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"
-print(f"Descargando modelo base con token: {token[:10]}...")
-
-pipe = AutoPipelineForText2Image.from_pretrained(
-    "black-forest-labs/FLUX.1-dev",
-    torch_dtype=torch.bfloat16,
-    use_auth_token=token
-)
-EOF
-
-# Descargar LoRA NSFW
-RUN mkdir -p /app/models && \
-    wget --header="Authorization: Bearer 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" \
-    -O /app/models/Flux-uncensored-v2.safetensors \
-    https://huggingface.co/enhanceaiteam/Flux-uncensored-v2/resolve/main/lora.safetensors
-
-# Limpieza de token (seguridad)
-RUN rm -rf ~/.cache/huggingface && \
-    echo "Token eliminado del entorno ✅"
+# El token de Hugging Face se inyecta desde RunPod y lo toma FastAPI
+ARG HUGGINGFACE_HUB_TOKEN
+ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
 
 # ==============================
 # Configuración de FastAPI
