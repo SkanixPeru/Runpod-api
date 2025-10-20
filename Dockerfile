@@ -1,22 +1,18 @@
-# 1. Usar una imagen base de Python
-FROM python:3.9-slim
+FROM nvidia/cuda:12.1.105-cudnn8-runtime-ubuntu22.04
 
-# 2. Establecer el directorio de trabajo
+# Instalar Python
+RUN apt-get update && apt-get install -y python3 python3-pip git
+
+# Copiar archivos
 WORKDIR /app
+COPY . /app
 
-# 3. Instalar dependencias
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Instalar dependencias
+RUN pip3 install --upgrade pip
+RUN pip3 install -r requirements.txt
 
-# 4. Crear el directorio para el modelo
-#    Esto se hará automáticamente por app.py si no existe
-#    RUN mkdir /app/model_sd3_5_large
-
-# 6. Copiar el script de tu API (app.py)
-COPY app.py .
-
-# 7. Exponer el puerto del servidor
+# Exponer puerto FastAPI
 EXPOSE 8000
 
-# 8. Comando para iniciar el servidor
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Ejecutar servidor
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
