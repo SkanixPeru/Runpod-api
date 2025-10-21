@@ -10,14 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
 # Instalar dependencias básicas
-RUN apt-get update && apt-get install -y \
-    git \
-    python3-pip \
-    python3-dev \
-    wget \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
+RUN apt-get update && apt-get install -y git python3-pip python3-dev wget curl && rm -rf /var/lib/apt/lists/*
 # Crear carpeta de la app e instalar Python
 WORKDIR /app
 
