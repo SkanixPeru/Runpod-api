@@ -8,3 +8,4 @@ safetensors==0.3.2
 fastapi==0.101.0
 uvicorn==0.24.0
 pillow==10.0.0
+python-multipart
